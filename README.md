@@ -87,7 +87,7 @@ _Body:_
 ```json
 {
     "UserId": 100,
-	"Type":   "LIMIT"/"MARKET",
+	"Type":   "LIMIT/MARKET",
 	"Bid" :   true,
 	"Size":   150,
 	"Price":  123.43,
@@ -105,7 +105,7 @@ GET /book/asks
 ```
 _Response:_
 ```json
-{Price: 123.2}
+{"Price": 123.2}
 ```
 
 ### 5. Get Best Bid
@@ -114,14 +114,25 @@ GET /book/bids
 ```
 _Response:_
 ```json
-{Price: 123.2}
+{"Price": 123.2}
 ```
 
 ### 6. Get Trades
 ```http
 GET /trades/ETH
 ```
-
+_Response:_
+```json
+[
+    { 
+        "Price":  123.2,
+        "Size"  :150,
+        "Bid"  : "ask/bid",
+        "Timestamp": 12350000
+    },
+    .....
+]
+```
 
 ## Market-Making Strategies
 Users can build their own market-making strategies by integrating custom trading algorithms and subscribing to order book updates.
