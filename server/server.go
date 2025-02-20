@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 	"github.com/vinaykhanchi712/crypto-exchange/orderbook"
@@ -33,13 +34,25 @@ type (
 	Market    string
 	OrderType string
 
+	ConnectionManager struct {
+		Conn map[*websocket.Conn]bool
+		mu   sync.RWMutex
+	}
+
+	Ticker struct {
+		Price       float64
+		Spread      float64
+		TotalVolume float64
+	}
+
 	Exchange struct {
-		Client     *ethclient.Client
-		mu         sync.RWMutex
-		Users      map[int64]*User
-		Orders     map[int64][]*orderbook.Order //userId->order[] map
-		PrivateKey *ecdsa.PrivateKey
-		orderbooks map[Market]*orderbook.Orderbook
+		Client      *ethclient.Client
+		ConnManager *ConnectionManager
+		mu          sync.RWMutex
+		Users       map[int64]*User
+		Orders      map[int64][]*orderbook.Order //userId->order[] map
+		PrivateKey  *ecdsa.PrivateKey
+		orderbooks  map[Market]*orderbook.Orderbook
 	}
 
 	PlaceOrderRequest struct {
@@ -75,6 +88,36 @@ type (
 	}
 )
 
+func NewConnectionManager() *ConnectionManager {
+	return &ConnectionManager{
+		Conn: make(map[*websocket.Conn]bool),
+	}
+}
+
+func (cm *ConnectionManager) AddConnection(conn *websocket.Conn) {
+	cm.mu.Lock()
+	cm.Conn[conn] = true
+	cm.mu.Unlock()
+}
+
+func (cm *ConnectionManager) RemoveConnection(conn *websocket.Conn) {
+	cm.mu.Lock()
+	delete(cm.Conn, conn)
+	cm.mu.Unlock()
+}
+
+func (cm *ConnectionManager) Broadcast(msg []byte) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	for conn := range cm.Conn {
+		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			log.Println("Error while broadcasting:", err)
+			cm.RemoveConnection(conn)
+			return
+		}
+	}
+}
+
 func StartServer() {
 	//new instance
 	e := echo.New()
@@ -104,8 +147,11 @@ func StartServer() {
 	e.GET("/book/bids", ex.handleGetBestBid)
 	e.GET("/book/asks", ex.handleGetBestAsk)
 
+	e.GET("/ws", ex.websocketHandler)
+
 	// Start server
-	if err := e.Start(":3000"); err != nil && !errors.Is(err, http.ErrServerClosed) {
+
+	if err := e.Start(":8080"); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("failed to start server", "error", err)
 	}
 }
@@ -130,9 +176,40 @@ func httpErrorHandler(err error, c echo.Context) {
 	fmt.Println(err)
 }
 
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+func (ex *Exchange) websocketHandler(c echo.Context) error {
+	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		log.Println("Error while upgrading to websocket: ", err)
+		return err
+	}
+	defer conn.Close()
+	ex.ConnManager.AddConnection(conn)
+	logrus.Info("New connection added")
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Error while reading message: ", err)
+			return err
+		}
+
+		logrus.Info("Received message: ", string(msg))
+
+	}
+	return nil
+}
+
 func NewExchange(privateKey string, client *ethclient.Client) (*Exchange, error) {
 	ob := make(map[Market]*orderbook.Orderbook)
 	ob[MarketETH] = orderbook.NewOrderBook()
+
+	manager := NewConnectionManager()
 
 	key, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
@@ -140,11 +217,12 @@ func NewExchange(privateKey string, client *ethclient.Client) (*Exchange, error)
 	}
 
 	return &Exchange{
-		Client:     client,
-		Users:      make(map[int64]*User),
-		Orders:     make(map[int64][]*orderbook.Order),
-		PrivateKey: key,
-		orderbooks: ob,
+		Client:      client,
+		Users:       make(map[int64]*User),
+		Orders:      make(map[int64][]*orderbook.Order),
+		PrivateKey:  key,
+		orderbooks:  ob,
+		ConnManager: manager,
 	}, nil
 }
 
@@ -235,6 +313,9 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 		"type":      order.Type(),
 		"userId":    order.UserId,
 	}).Info("Filled Market Order")
+	//broadcast to all connected clients
+
+	go broadcastToAllConnections(avgPrice, ob, ex)
 
 	newOrderMap := make(map[int64][]*orderbook.Order)
 
@@ -251,6 +332,20 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 	ex.Orders = newOrderMap
 	ex.mu.Unlock()
 	return matches, matchedOrders
+}
+
+func broadcastToAllConnections(avgPrice float64, ob *orderbook.Orderbook, ex *Exchange) {
+	tickerExport := Ticker{
+		Price:       avgPrice,
+		TotalVolume: ob.AskTotalVolume() + ob.BidsTotalVolume(),
+		Spread:      ob.GetBestAsks()[0].Price - ob.GetBestBids()[0].Price,
+	}
+
+	msg, marshallError := json.Marshal(tickerExport)
+	if marshallError != nil {
+		logrus.Error("Error while marshalling ticker data:", marshallError)
+	}
+	ex.ConnManager.Broadcast(msg)
 }
 
 type PlaceOrderResponse struct {

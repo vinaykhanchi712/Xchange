@@ -11,7 +11,7 @@ A fully functional stock exchange clone where users can:
 ✅ Market and limit order support  
 ✅ Order cancellation  
 ✅ API-driven architecture  
-✅ Subscription mechanism for real-time notifications 
+✅ Subscription/websocket mechanism for real-time notifications 
 ✅ Custom market-making strategies  
 
 ## Tech Stack
@@ -132,6 +132,20 @@ _Response:_
     },
     .....
 ]
+```
+
+
+### 6. Establish Websocket Connection
+```http
+GET ws:{FQDN}/ws
+```
+_Response:_
+```json
+{ 
+    "Price":1000,
+    "Spread":10,
+    "TotalVolume":74
+}
 ```
 
 ## Market-Making Strategies

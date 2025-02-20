@@ -1,0 +1,38 @@
+1. Hash Maps + Linked Lists (NASDAQ, HFT Firms)
+
+Best bid/ask is stored separately (O(1) retrieval).
+Orders at the same price level are stored in a linked list (FIFO order execution).
+Insert/Delete is O(1) for individual orders.
+Used in high-speed order-matching engines.
+
+
+2. Bucketed Price Arrays (Used in Ultra-Low Latency Trading)
+Orders are stored in a fixed-size array, indexed by price.
+Example: If prices range from $0.01 to $10,000, use an array of size 1,000,000 (each index = price * 100).
+O(1) lookups for best bid/ask.
+Used in firms with extreme latency sensitivity (microseconds response times).
+
+
+-----------------------------------------------------------
+
+Data Structure Design
+HashMap (price → order list)
+Key: Price Level
+Value: Linked List of orders at that price (FIFO execution for matching)
+BestBid / BestAsk Trackers
+Maintain bestBid (highest price in bids) and bestAsk (lowest price in asks) explicitly.
+Operations
+✅ Insert Order (O(1))
+
+Check if price exists in the HashMap.
+If exists, append order to the linked list.
+If new best bid/ask, update bestBid or bestAsk.
+✅ Delete Order (O(1))
+
+Remove order from the linked list at the price level.
+If the linked list becomes empty, delete the price level from HashMap.
+If that price was bestBid or bestAsk, find the next best price.
+✅ Get Best Bid/Ask (O(1))
+
+Store bestBid and bestAsk explicitly.
+Retrieve from the HashMap in constant time.

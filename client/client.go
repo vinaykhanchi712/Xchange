@@ -10,7 +10,7 @@ import (
 	"github.com/vinaykhanchi712/crypto-exchange/server"
 )
 
-const Endpoint string = "http://localhost:3000"
+const Endpoint string = "http://localhost:8080"
 
 type Client struct {
 	*http.Client
